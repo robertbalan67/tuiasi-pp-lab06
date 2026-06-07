@@ -1,60 +1,82 @@
 """
-Scanner de directoare care clasifică fișierele după conținut.
+Scanner recursiv de directoare care clasifică fișierele după conținut.
 
-Parcurge recursiv un director și folosește analizorii din file_analyzer.py
-pentru a clasifica fiecare fișier.
+Ordinea de aplicare a analizoarelor (prioritate descrescătoare):
+    BMP > ASCII > UNICODE > BINARY
+
+BMP trebuie verificat primul deoarece un BMP poate fi recunoscut
+și ca ASCII dacă conținut-ul e majoritar printabil.
 """
 
 from pathlib import Path
 
 from lab6.file_analyzer import (
-    FileType,
     AsciiAnalyzer,
-    UnicodeAnalyzer,
     BinaryAnalyzer,
     BmpAnalyzer,
+    FileType,
+    UnicodeAnalyzer,
 )
 
 
 class DirectoryScanner:
-    """Parcurge recursiv un director și clasifică fișierele găsite."""
+    """
+    Parcurge recursiv un director și clasifică fiecare fișier după conținut.
 
-    def __init__(self) -> None:
-        """Inițializează scanner-ul cu toți analizorii disponibili."""
-        # TODO: Creează instanțe pentru fiecare analyzer
-        # Ordinea contează: BMP trebuie verificat înaintea Binary
-        raise NotImplementedError("De implementat")
+    Exemplu:
+        scanner = DirectoryScanner()
+        results = scanner.scan("/home/user/documente")
+        # {
+        #     FileType.ASCII:   ["/home/user/documente/readme.txt"],
+        #     FileType.BMP:     ["/home/user/documente/imagine.bmp"],
+        #     FileType.BINARY:  ["/home/user/documente/data.bin"],
+        #     FileType.UNICODE: [],
+        #     FileType.UNKNOWN: [],
+        # }
+    """
 
-    # TODO: Implementează metoda scan
-    def scan(self, root_dir: str) -> dict[FileType, list[str]]:
-        """Parcurge recursiv directorul și clasifică fișierele.
+    # Analizoarele în ordinea priorităților — BMP primul, BINARY ultimul
+    _ANALYZERS = [
+        BmpAnalyzer(),
+        AsciiAnalyzer(),
+        UnicodeAnalyzer(),
+        BinaryAnalyzer(),
+    ]
 
-        Args:
-            root_dir: Calea absolută a directorului rădăcină.
-
-        Returns:
-            Dict unde cheile sunt FileType și valorile sunt liste
-            cu căile absolute ale fișierelor de acel tip.
-
-        Exemplu:
-            {
-                FileType.ASCII: ["/path/to/file.txt", "/path/to/doc.xml"],
-                FileType.BMP: ["/path/to/image.bmp"],
-                FileType.BINARY: ["/path/to/data.bin"],
-                FileType.UNICODE: [],
-                FileType.UNKNOWN: [],
-            }
+    def scan(self, directory: str) -> dict[FileType, list[str]]:
         """
-        raise NotImplementedError("De implementat")
+        Parcurge recursiv directorul și returnează un dict {FileType: [căi absolute]}.
 
-    def _classify_file(self, path: Path) -> FileType:
-        """Clasifică un singur fișier folosind analizorii în ordine.
-
-        Args:
-            path: Calea fișierului de analizat.
-
-        Returns:
-            Tipul detectat sau FileType.UNKNOWN dacă niciun analyzer nu îl recunoaște.
+        - Sare peste directoare și fișiere inaccesibile (PermissionError etc.)
+        - Toate căile din rezultat sunt absolute.
+        - Toate cheile din FileType sunt prezente (liste goale dacă nu există).
         """
-        # TODO: Citește conținutul fișierului și aplică analizorii în ordine
-        raise NotImplementedError("De implementat")
+        result: dict[FileType, list[str]] = {ft: [] for ft in FileType}
+        root = Path(directory)
+
+        for path in root.rglob("*"):
+            if not path.is_file():
+                continue
+            try:
+                content = path.read_bytes()
+                file_type = self._classify(content)
+            except Exception:
+                # Fișier inaccesibil sau eroare de citire → UNKNOWN
+                file_type = FileType.UNKNOWN
+
+            result[file_type].append(str(path.resolve()))
+
+        return result
+
+    # ── Privat ────────────────────────────────────────────────────────────────
+
+    def _classify(self, content: bytes) -> FileType:
+        """
+        Aplică analizoarele în ordine și returnează primul tip recunoscut.
+        Dacă niciun analyzer nu recunoaște conținutul → UNKNOWN.
+        """
+        for analyzer in self._ANALYZERS:
+            ft = analyzer.analyze(content)
+            if ft != FileType.UNKNOWN:
+                return ft
+        return FileType.UNKNOWN
